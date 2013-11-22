@@ -40,7 +40,7 @@ class Downloader(ToolGUI):
         req = urllib2.Request(url)  
         data = urllib.urlencode(data)
         response = self.opener.open(req, data)  
-        return response.read()    #not decoded
+        return response.read()    # ResponseText not decoded yet
 
     def cmd_login(self, event):
         user = self.txtUser.get()
@@ -57,7 +57,7 @@ class Downloader(ToolGUI):
             tkMessageBox.showinfo(u'登录失败',  u'*** %s ***' % obj_json['err_msg'])
             if obj_json['err_msg'] == u'验证码不正确':
                 self.cmdLogin.config(state='disabled')
-                self.downCAPTCHA()
+                self.downCAPTCHA()   # You know, this may take some time, but I'd rather let user wait
                 self.txtCAPTCHA.delete(0, 'end')
                 self.txtCAPTCHA.focus_set()
         else:
@@ -69,28 +69,32 @@ class Downloader(ToolGUI):
             # Check user level
             self.vip_1 = False
             self.vip_2 = False
+            self.vip_3 = False
             if os.path.exists(os.getcwd() + os.sep + 'user.dat'):
                 key1 = md5.new(self.douban_user + 'liked!@#').hexdigest()
                 key2 = md5.new(self.douban_url + 'liked!@#').hexdigest()
                 key3 = md5.new(self.douban_user + 'album!@#').hexdigest()
                 key4 = md5.new(self.douban_url+ 'album!@#').hexdigest()
+                key5 = md5.new(self.douban_user + 'site!@#').hexdigest()
+                key6 = md5.new(self.douban_url+ 'site!@#').hexdigest()
                 with open('user.dat', 'r') as inFile:
                     code_str = inFile.read()
                 if code_str.find(key1) >= 0 or code_str.find(key2) >= 0:
                     self.vip_1 = True
                 if code_str.find(key3) >=0 or code_str.find(key4) >= 0:
                     self.vip_2 = True
-            print self.vip_1, self.vip_2
+                if code_str.find(key5) >=0 or code_str.find(key6) >= 0:
+                    self.vip_3 = True
             self.root.withdraw()    #hide login window, show mainWindow
             self.mainWindow()
         return
 
-    def cmd_down(self, event):
+    def cmd_down_liked(self, event):
         self.cmdDown.config(state='disabled')
         self.lbl_status.config(text=u'正在获取曲目, 请稍后 ...')
         html_doc = urllib2.urlopen('http://douban.fm/mine#!type=liked&start=0').read().decode('utf-8')
-        script_re = re.compile(r'<script>([\s\S]+?)</script>')
-        scripts = script_re.findall(html_doc)
+        re_scripts = re.compile(r'<script>([\s\S]+?)</script>')
+        scripts = re_scripts.findall(html_doc)
         script = scripts[-2]
         ghost = Ghost()
         self.douban_user_id_sign, res = ghost.evaluate(script+';window.user_id_sign;')
@@ -98,17 +102,48 @@ class Downloader(ToolGUI):
             if c.name == 'bid':
                 self.douban_bid = c.value.strip('"')
         self.douban_spbid = self.douban_user_id_sign + self.douban_bid
-        self.douban_liked_down_count = 0
-        threading.Thread(target=self.down_master).start()
+        threading.Thread(target=self.down_liked_master).start()
         return
+
+    def down_liked_master(self):
+        self.douban_liked_folder = os.path.join(self.path_var.get(),
+                                                u'红心 - ' + self.valid_file_name(self.douban_user))
+        if not os.path.exists(self.douban_liked_folder):
+            os.mkdir(self.douban_liked_folder)
+        start = 0    # Page 1
+        song_add_count = 0
+        self.douban_liked_down_count = 0
+        while not self.DEAD:
+            req = urllib2.Request('http://douban.fm/j/play_record?ck=%s&spbid=%s&type=liked&start=%s' %
+                                  (self.douban_ck, self.douban_spbid, start))
+            req.add_header('Referer', 'http://douban.fm/mine')
+            response = self.opener.open(req)
+            json_doc = response.read().decode('utf8', 'ignore')
+            obj_json = json.loads(json_doc)
+            if len(obj_json['songs']) == 0:
+                break
+            for song in obj_json['songs']:
+                item = 'liked', song['path'], song['id'], song['title'], song['artist']
+                song_queue.put(item)
+                song_add_count += 1
+            if song_add_count >= 50 and (not self.vip_1):
+                break
+            start += 15
+            time.sleep(1)
+        while not self.DEAD:
+            if not song_queue.empty():
+                time.sleep(0.2)
+            else:
+                self.cmdDown.config(state='normal')
+                break
 
     def cmd_down_album(self, event):
         self.cmdDownAlbum.config(state='disabled')
         self.lbl_status.config(text=u'正在获取曲目, 请稍后 ...')
-        html_doc = urllib2.urlopen(self.album_url.get()).read().decode('utf-8')
+        html_doc = urllib2.urlopen(self.douban_album_url.get()).read().decode('utf-8')
         album_name = re.search('<h1>([\s\S]+?)</h1>', html_doc).group(1)
         self.douban_album_name = album_name = re.search('<span>(.*)</span>', album_name).group(1).strip()
-        self.douban_album_folder = self.path_var.get() + os.sep + self.valid_file_name(album_name)
+        self.douban_album_folder = os.path.join(self.path_var.get(), self.valid_file_name(album_name))
         if not os.path.exists(self.douban_album_folder):
             os.mkdir(self.douban_album_folder)
         re_song_item = re.compile('<li class="song-item"[\s\S]+?</li>')
@@ -128,58 +163,68 @@ class Downloader(ToolGUI):
             item = 'album', song_id, ssid, singer, song_title
             song_queue.put(item)
             song_add_count += 1
-        while not self.DEAD and song_queue.qsize() > 0:
-            time.sleep(0.2)
-        self.cmdDownAlbum.config(state='normal')
-        return
-            
-
-    def down_master(self):
-        self.douban_liked_folder = self.path_var.get() + os.sep + u'红心 - ' + self.valid_file_name(self.douban_user)
-        if not os.path.exists(self.douban_liked_folder):
-            os.mkdir(self.douban_liked_folder)
-        start = 0
-        global song_queue
-        song_add_count = 0
-        while True and not self.DEAD:
-            req = urllib2.Request('http://douban.fm/j/play_record?ck=%s&spbid=%s&type=liked&start=%s' %
-                                  (self.douban_ck, self.douban_spbid, start))
-            req.add_header('Referer', 'http://douban.fm/mine')
-            response = self.opener.open(req)
-            json_doc = response.read().decode('utf8', 'ignore')
-            obj_json = json.loads(json_doc)
-            #print json_doc.encode('gbk', 'ignore')
-            if len(obj_json['songs']) == 0:
+        while not self.DEAD:
+            if not song_queue.empty():
+                time.sleep(0.2)
+            else:
+                self.cmdDownAlbum.config(state='normal')
                 break
-            for song in obj_json['songs']:
-                item = 'liked', song['path'], song['id'], song['title'], song['artist'], ''
+
+    def cmd_down_site(self, event):
+        self.cmdDownSite.config(state='disabled')
+        self.lbl_status.config(text=u'正在获取曲目, 请稍后 ...')
+        html_doc = urllib2.urlopen(self.douban_site_url.get()).read().decode('utf-8')
+        self.douban_site_name = re.search('<div class="sp-logo">[\s\S]+?alt="(.*?)"', html_doc).group(1).strip()
+        self.douban_site_folder = os.path.join(self.path_var.get(),
+                                               u'小站 - ' + self.valid_file_name(self.douban_site_name))
+        if not os.path.exists(self.douban_site_folder):
+            os.mkdir(self.douban_site_folder)
+        re_song_records = re.compile('song_records = (\[[\s\S]+?\])')
+        song_add_count = 0        
+        for record in re_song_records.findall(html_doc):
+            obj_json = json.loads(record)
+            for song_item in obj_json: 
+                song_title = song_item['name']
+                song_url = song_item['rawUrl']
+                item = 'site', song_title, song_url
                 song_queue.put(item)
                 song_add_count += 1
-            if song_add_count >= 50 and (not self.vip_1):
+            if song_add_count >= 10 and not self.vip_3:
                 break
-            start += 15
-            time.sleep(1)
-        while not self.DEAD and not song_queue.empty():
-            time.sleep(0.2)
-        self.cmdDown.config(state='normal')
-        return
+        while not self.DEAD:
+            if not song_queue.empty():
+                time.sleep(0.2)
+            else:
+                self.cmdDownSite.config(state='normal')
+                break
 
     def down_slave(self):
         while True:
             item = song_queue.get()                
             try:
                 if item[0] == 'liked':
-                    type, song_path, song_id, song_title, song_artist, album_name = item
+                    type, song_path, song_id, song_title, song_artist = item
                     html_doc = urllib2.urlopen(song_path).read().decode('utf-8')
                     ssid = re.search('<li class="song-item" id="%s" data-ssid="(\w+)">' % song_id, html_doc).group(1)
                 elif item[0] == 'album':
                     type, song_id, ssid, song_artist, song_title = item
-                json_doc = app.post('http://music.douban.com/j/songlist/get_song_url', {'sid': song_id, 'ssid': ssid, 'ck': app.douban_ck})
-                song_url = json.loads(json_doc)['r']
+                elif item[0] == 'site':
+                    type, song_title, song_url = item
+
+                if type != 'site': # Need fetch url first
+                    json_doc = app.post('http://music.douban.com/j/songlist/get_song_url',
+                                        {'sid': song_id, 'ssid': ssid, 'ck': app.douban_ck})
+                    song_url = json.loads(json_doc)['r']
+                    
                 if type == 'liked':
-                    save_path = app.douban_liked_folder + os.sep + self.valid_file_name(song_title + ' -' + song_artist) + '.mp3'
-                else:
-                    save_path = self.douban_album_folder + os.sep + self.valid_file_name(song_title + ' -' + song_artist) + '.mp3'
+                    save_path = os.path.join(app.douban_liked_folder,
+                                             self.valid_file_name(song_title + ' -' + song_artist) + '.mp3')
+                elif type == 'album':
+                    save_path = os.path.join(self.douban_album_folder,
+                                             self.valid_file_name(song_title + ' -' + song_artist) + '.mp3')
+                elif type == 'site':
+                    save_path = os.path.join(self.douban_site_folder,
+                                             self.valid_file_name(song_title) + '.mp3')
                 for i in range(3):
                     if os.path.exists(save_path):
                         self.lbl_status.config(text=u'已存在的曲目: %s' % song_title)
@@ -197,18 +242,26 @@ class Downloader(ToolGUI):
             if type == 'liked':
                 self.douban_liked_down_count += 1
                 self.lbl_status.config(text=u'已下载 %s / %s:\n%s' %
-                                      (app.douban_liked_down_count, app.douban_liked_count, song_title + ' - ' + song_artist))
+                                      (self.douban_liked_down_count,
+                                       self.douban_liked_count,
+                                       song_title + ' - ' + song_artist))
             elif type == 'album':
-                self.lbl_status.config(text=u'下载完成专辑曲目:\n%s' % song_title + ' - ' + song_artist)
+                self.lbl_status.config(text=u'下载完成专辑曲目:\n%s' %
+                                       song_title + ' - ' + song_artist)
+            elif type == 'site':
+                self.lbl_status.config(text=u'下载完成小站曲目:\n%s' %
+                                       song_title)
             song_queue.task_done()
             time.sleep(0.1)
             if song_queue.empty():
-                if type == 'liked' and self.cmdDown.cget('state') == 'normal':
+                if type == 'liked':
                     self.lbl_status.config(text=u'加心曲目已下载完成. ')
-                elif type == 'album' and self.cmdDownAlbum.cget('state') == 'normal':
+                elif type == 'album':
                     self.lbl_status.config(text=u'专辑《%s》已下载完成. ' % self.douban_album_name)
+                elif type == 'site':
+                    self.lbl_status.config(text=u'小站《%s》已下载完成. ' % self.douban_site_name)
 
-    def valid_file_name(self, file_name):
+    def valid_file_name(self, file_name):    # Some invalid chars should be replaced
         rstr = r'[\/\\\:\*\?\"\<\>\|]'
         return re.sub(rstr, '', file_name).strip()
     
