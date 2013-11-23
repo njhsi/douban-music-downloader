@@ -42,7 +42,7 @@ class ToolGUI():
         self.lbl_CAPTCHA.grid(row=5, column=1, sticky=NW, pady=5)
 
         self.cmdLogin = Button(root, text=u'登 录', state=DISABLED, width=5,
-                               command=self.create_login_thread)
+                               command=lambda:self.cmd_login(self))
         self.cmdLogin.grid(row=6, column=1, sticky=W, pady=5)
         self.cmdLogin.bind('<Return>', self.cmd_login)
         
@@ -135,8 +135,6 @@ class ToolGUI():
         pass
     def cmd_down_site(self, event):
         pass
-    def create_login_thread(self):
-        threading.Thread(target=self.cmd_login, args=(self,)).start()
     def create_down_album_thread(self):
         threading.Thread(target=self.cmd_down_album, args=(self,)).start()
     def create_down_site_thread(self):
