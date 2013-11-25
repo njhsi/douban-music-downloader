@@ -70,13 +70,13 @@ class Downloader(ToolGUI):
             self.vip_1 = False
             self.vip_2 = False
             self.vip_3 = False
-            if os.path.exists(os.getcwd() + os.sep + 'user.dat'):
-                key1 = md5.new(self.douban_user + 'liked!@#').hexdigest()
-                key2 = md5.new(self.douban_url + 'liked!@#').hexdigest()
-                key3 = md5.new(self.douban_user + 'album!@#').hexdigest()
-                key4 = md5.new(self.douban_url+ 'album!@#').hexdigest()
-                key5 = md5.new(self.douban_user + 'site!@#').hexdigest()
-                key6 = md5.new(self.douban_url+ 'site!@#').hexdigest()
+            if os.path.exists(os.getcwd() + os.sep + u'user.dat'):
+                key1 = md5.new(u''.join([self.douban_user, u'liked!@#']).encode('utf-8')).hexdigest()
+                key2 = md5.new(u''.join([self.douban_url, u'liked!@#']).encode('utf-8')).hexdigest()
+                key3 = md5.new(u''.join([self.douban_user, u'album!@#']).encode('utf-8')).hexdigest()
+                key4 = md5.new(u''.join([self.douban_url, u'album!@#']).encode('utf-8')).hexdigest()
+                key5 = md5.new(u''.join([self.douban_user, u'site!@#']).encode('utf-8')).hexdigest()
+                key6 = md5.new(u''.join([self.douban_url, u'site!@#']).encode('utf-8')).hexdigest()
                 with open('user.dat', 'r') as inFile:
                     code_str = inFile.read()
                 if code_str.find(key1) >= 0 or code_str.find(key2) >= 0:
