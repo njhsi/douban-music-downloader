@@ -17,16 +17,32 @@ import md5
 
 
 class Downloader(ToolGUI):
+    def __init__(self):
+        ToolGUI.__init__(self)
+        self.busy_slaves = 0
+        self.lock = threading.Lock()
+    def slave_enter(self):    # Working
+        self.lock.acquire()
+        self.busy_slaves += 1
+        self.lock.release()
+    def slave_exit(self):    # Done
+        self.lock.acquire()
+        self.busy_slaves -= 1
+        self.lock.release()
+        
     def downCAPTCHA(self):
         self.cookie = cookielib.CookieJar()
         self.opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(self.cookie))
+        self.opener.addheaders = [('User-Agent',
+                                   'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 \
+                                   (KHTML, like Gecko) Chrome/31.0.1650.48 Safari/537.36')]
         urllib2.install_opener(self.opener)
-        while True:
+        while True and not self.DEAD:
             try:
                 self.CAPTCHA_id = CAPTCHA_id = urllib2.urlopen('http://douban.fm/j/new_captcha').read().strip('"')
                 break
-            except:
-                self.lbl_CAPTCHA.config(text=u'无法获取验证码, 重试...')
+            except Exception, e:
+                self.lbl_CAPTCHA.config(text=u'无法获取验证码...\n' + str(e))
                 time.sleep(1)
         with open('CAPTCHA.jpg', 'wb') as outFile:
             outFile.write(urllib2.urlopen('http://www.douban.com/misc/captcha?size=m&id=' + CAPTCHA_id).read())
@@ -129,13 +145,13 @@ class Downloader(ToolGUI):
             if song_add_count >= 50 and (not self.vip_1):
                 break
             start += 15
-            time.sleep(1)
         while not self.DEAD:
-            if not song_queue.empty():
-                time.sleep(0.2)
-            else:
+            if song_queue.empty() and self.busy_slaves == 0:
                 self.cmdDown.config(state='normal')
+                self.lbl_status.config(text=u'红心曲目全部下载完毕 :)')
                 break
+            else:
+                time.sleep(0.2)
 
     def cmd_down_album(self, event):
         self.cmdDownAlbum.config(state='disabled')
@@ -164,11 +180,13 @@ class Downloader(ToolGUI):
             song_queue.put(item)
             song_add_count += 1
         while not self.DEAD:
-            if not song_queue.empty():
-                time.sleep(0.2)
-            else:
+            if song_queue.empty() and self.busy_slaves == 0:
                 self.cmdDownAlbum.config(state='normal')
+                self.lbl_status.config(text=u'专辑曲目已下载完毕 :)')
                 break
+            else:
+                time.sleep(0.2)
+
 
     def cmd_down_site(self, event):
         self.cmdDownSite.config(state='disabled')
@@ -192,84 +210,102 @@ class Downloader(ToolGUI):
             if song_add_count >= 10 and not self.vip_3:
                 break
         while not self.DEAD:
-            if not song_queue.empty():
-                time.sleep(0.2)
-            else:
+            if song_queue.empty() and self.busy_slaves == 0:
                 self.cmdDownSite.config(state='normal')
+                self.lbl_status.config(text=u'小站曲目已下载完毕 :)')
                 break
+            else:
+                time.sleep(0.2)
+
 
     def down_slave(self):
         while True:
-            item = song_queue.get()                
+            item = song_queue.get()
+            self.slave_enter()
+            if item[0] == 'liked':
+                type, song_path, song_id, song_title, song_artist = item
+                save_path = os.path.join(app.douban_liked_folder,
+                     self.valid_file_name(song_title + ' -' + song_artist) + '.mp3')
+                self.douban_liked_down_count += 1
+            elif item[0] == 'album':
+                type, song_id, ssid, song_artist, song_title = item
+                save_path = os.path.join(self.douban_album_folder,
+                                         self.valid_file_name(song_title + ' -' + song_artist) + '.mp3')
+            elif item[0] == 'site':
+                type, song_title, song_url = item
+                save_path = os.path.join(self.douban_site_folder,
+                                         self.valid_file_name(song_title) + '.mp3')
+            if os.path.exists(save_path):
+                self.lbl_status.config(text=u'文件已经存在: 《%s》' % song_title)
+                song_queue.task_done()
+                self.slave_exit()
+                continue    # Files exists
+
             try:
                 if item[0] == 'liked':
-                    type, song_path, song_id, song_title, song_artist = item
-                    html_doc = urllib2.urlopen(song_path).read().decode('utf-8')
+                    for i in range(3):    # try 3 times at most
+                        try:
+                            html_doc = urllib2.urlopen(song_path).read().decode('utf-8')
+                        except Exception as e:
+                            if str(e).find('HTTP Error 403') > 0:
+                                time.sleep(3)
+                            else:
+                                pass
                     ssid = re.search('<li class="song-item" id="%s" data-ssid="(\w+)">' % song_id, html_doc).group(1)
-                elif item[0] == 'album':
-                    type, song_id, ssid, song_artist, song_title = item
-                elif item[0] == 'site':
-                    type, song_title, song_url = item
-
                 if type != 'site': # Need fetch url first
                     json_doc = app.post('http://music.douban.com/j/songlist/get_song_url',
                                         {'sid': song_id, 'ssid': ssid, 'ck': app.douban_ck})
                     song_url = json.loads(json_doc)['r']
                     
-                if type == 'liked':
-                    save_path = os.path.join(app.douban_liked_folder,
-                                             self.valid_file_name(song_title + ' -' + song_artist) + '.mp3')
-                elif type == 'album':
-                    save_path = os.path.join(self.douban_album_folder,
-                                             self.valid_file_name(song_title + ' -' + song_artist) + '.mp3')
-                elif type == 'site':
-                    save_path = os.path.join(self.douban_site_folder,
-                                             self.valid_file_name(song_title) + '.mp3')
                 for i in range(3):
-                    if os.path.exists(save_path):
-                        self.lbl_status.config(text=u'已存在的曲目: %s' % song_title)
-                        break 
                     try:
                         mp3_data = urllib.urlopen(song_url).read()
                         with open(save_path, 'wb') as outFile:
                             outFile.write(mp3_data)
                         break
                     except Exception as e:
-                        print e
-                        pass
-            except:
-                pass
+                        print 'song urlopen error:', e
+            except Exception as e:
+                print 'unexpected error:', e, song_path
+                song_queue.task_done()
+                self.slave_exit()
+                continue
             if type == 'liked':
-                self.douban_liked_down_count += 1
-                self.lbl_status.config(text=u'已下载 %s / %s:\n%s' %
+                
+                self.lbl_status.config(text=u'已下载红心曲目 %s / %s:\n%s' %
                                       (self.douban_liked_down_count,
                                        self.douban_liked_count,
                                        song_title + ' - ' + song_artist))
             elif type == 'album':
-                self.lbl_status.config(text=u'下载完成专辑曲目:\n%s' %
+                self.lbl_status.config(text=u'专辑曲目下载完成:\n%s' %
                                        song_title + ' - ' + song_artist)
             elif type == 'site':
-                self.lbl_status.config(text=u'下载完成小站曲目:\n%s' %
+                self.lbl_status.config(text=u'小站曲目下载完成:\n%s' %
                                        song_title)
             song_queue.task_done()
-            time.sleep(0.1)
-            if song_queue.empty():
-                if type == 'liked':
-                    self.lbl_status.config(text=u'加心曲目已下载完成. ')
-                elif type == 'album':
-                    self.lbl_status.config(text=u'专辑《%s》已下载完成. ' % self.douban_album_name)
-                elif type == 'site':
-                    self.lbl_status.config(text=u'小站《%s》已下载完成. ' % self.douban_site_name)
+            self.slave_exit()
+            time.sleep(0.01)
+
 
     def valid_file_name(self, file_name):    # Some invalid chars should be replaced
         rstr = r'[\/\\\:\*\?\"\<\>\|]'
         return re.sub(rstr, '', file_name).strip()
     
 
-song_queue = Queue.Queue()
+song_queue = Queue.Queue()    # In case APP blocked by douban, Only 10 items allowed, add on 2013-12-12
 app = Downloader()
 threading.Thread(target=app.downCAPTCHA).start()    # Down CAPTCHA
-for i in range(5):
+
+max_threads = 3
+file_path = os.path.join(os.getcwd(), 'threads.txt')
+if os.path.exists(file_path):
+    with open('threads.txt') as inFile:
+        try:
+            max_threads = int(inFile.read())
+        except:
+            pass
+
+for i in range(max_threads):
     slave_thread = threading.Thread(target=app.down_slave, args=())
     slave_thread.setDaemon(True)
     slave_thread.start()
