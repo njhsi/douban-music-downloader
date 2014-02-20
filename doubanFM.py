@@ -3,6 +3,7 @@
 
 from GUI import ToolGUI
 from ImageTk import PhotoImage
+from mutagen import File as FileKind
 import threading
 import urllib2, urllib
 import cookielib
@@ -113,7 +114,11 @@ class Downloader(ToolGUI):
         scripts = re_scripts.findall(html_doc)
         script = scripts[-2]
         ghost = Ghost()
-        self.douban_user_id_sign, res = ghost.evaluate(script+';window.user_id_sign;')
+        for  script in scripts:
+            self.douban_user_id_sign, res = ghost.evaluate(script+';window.SP;')
+            print script, 'xxxxxxxxx', self.douban_user_id_sign
+            if self.douban_user_id_sign: break
+        if not self.douban_user_id_sign: self.douban_user_id_sign='::'
         for c in self.cookie:
             if c.name == 'bid':
                 self.douban_bid = c.value.strip('"')
@@ -262,6 +267,8 @@ class Downloader(ToolGUI):
                         mp3_data = urllib.urlopen(song_url).read()
                         with open(save_path, 'wb') as outFile:
                             outFile.write(mp3_data)
+                        filekind = FileKind(save_path)
+                        if [x for x in filekind.mime if ('mp4' in x or 'm4a' in x)]: os.rename(save_path, save_path+'.m4a')
                         break
                     except Exception as e:
                         print 'song urlopen error:', e
