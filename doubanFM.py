@@ -116,7 +116,7 @@ class Downloader(ToolGUI):
         ghost = Ghost()
         for  script in scripts:
             self.douban_user_id_sign, res = ghost.evaluate(script+';window.SP;')
-            print script, 'xxxxxxxxx', self.douban_user_id_sign
+            #print script, 'xxxxxxxxx', self.douban_user_id_sign
             if self.douban_user_id_sign: break
         if not self.douban_user_id_sign: self.douban_user_id_sign='::'
         for c in self.cookie:
@@ -147,7 +147,7 @@ class Downloader(ToolGUI):
                 item = 'liked', song['path'], song['id'], song['title'], song['artist']
                 song_queue.put(item)
                 song_add_count += 1
-            if song_add_count >= 50 and (not self.vip_1):
+            if song_add_count >= 500 and (not self.vip_1):
                 break
             start += 15
         while not self.DEAD:
@@ -240,7 +240,7 @@ class Downloader(ToolGUI):
                 type, song_title, song_url = item
                 save_path = os.path.join(self.douban_site_folder,
                                          self.valid_file_name(song_title) + '.mp3')
-            if os.path.exists(save_path):
+            if os.path.exists(save_path) or os.path.exists(save_path[:-4]+'.m4a'):
                 self.lbl_status.config(text=u'文件已经存在: 《%s》' % song_title)
                 song_queue.task_done()
                 self.slave_exit()
@@ -268,7 +268,7 @@ class Downloader(ToolGUI):
                         with open(save_path, 'wb') as outFile:
                             outFile.write(mp3_data)
                         filekind = FileKind(save_path)
-                        if [x for x in filekind.mime if ('mp4' in x or 'm4a' in x)]: os.rename(save_path, save_path+'.m4a')
+                        if [x for x in filekind.mime if ('mp4' in x or 'm4a' in x)]: os.rename(save_path, save_path[:-4]+'.m4a')
                         break
                     except Exception as e:
                         print 'song urlopen error:', e
